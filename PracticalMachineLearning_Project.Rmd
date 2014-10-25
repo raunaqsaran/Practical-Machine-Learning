@@ -1,0 +1,90 @@
+---
+title: "Practical Machine Leaning - Project"
+output: html_document
+---
+
+####Objective:
+To predict how the participants did their exercise. Participants could perform the exercise in 5 different ways, which are described by 5 different classes based on certain parameters. The objective is to prepare a model which would predict which class of exercise the participants fall in, based on certain data provided.
+
+####Data:
+The data can be downloaded from the following links:
+* https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv . This link contains the data that we'll use to train and prepare our model.
+* https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv . This link contains the data on which we'll test our model and use it to make predictions on the activities of the participants.
+
+#####Package dependancies:
+```{r,echo=TRUE,eval=TRUE}
+library(caret)
+library(randomForest)
+library(e1071)
+```
+
+#####Reading the data:
+We download the training data in the working directory and then read the data. Cursory look at the data showed that there are some "#DIV/0!" values too in the data, so we add them to the list of NA values. The first col is just an ID col, so we remove it as that will not play any role in preparing our model.
+```{r,echo=TRUE,eval=TRUE}
+trainingData <- read.csv("pml-training.csv", header=T, na.strings=c("", "NA", "#DIV/0!"))
+trainingData <- trainingData[,-1]
+```
+
+#####Creating the data partition to make training and data sets:
+We use a 60:40 split-
+```{r,echo=TRUE,eval=TRUE}
+trainPartition <- createDataPartition(trainingData$classe, p=0.60, list=FALSE)
+train_train <- trainingData[trainPartition,]
+train_test <- trainingData[-trainPartition,]
+```
+
+#####Handling NA values:
+There are many NA values in the data. We definitely would want to delete cols which contain only NAs. After this one approach can be to delete all NA values and edit the data frame accordingly. However, the approach I took was to select cols where atleast 50% of the cells have data i.e. cols where less than 50% of the values are NA values. This percentage can be lower or higher based on different requirements, but for this data I have selected 50%. The test dataset should be subjected to the same transformations as the training set. However, instead of doing it at the end while working on the test set, I prefer to do it while modifying the training set to ensure uniformity.
+```{r,echo=TRUE,eval=TRUE}
+cols_tokeep <- c(colSums(!is.na(train_train[,-ncol(train_train)])) >= 0.5*nrow(train_train))
+
+train_train_keep <- train_train[, cols_tokeep]
+train_test_keep <- train_test[, cols_tokeep]
+```
+
+#####Removing low variance cols
+We also remove cols where the values show little variance and are more or less constant, since these will not play a role in predicting the outcome:
+```{r,echo=TRUE,eval=TRUE}
+low_var_cols <- nearZeroVar(train_train_keep)
+train_train_keep <- train_train_keep[-low_var_cols]
+train_test_keep <- train_test_keep[-low_var_cols]
+```
+
+#####Final set of columns:
+Based on the above transformations, we have reduced the number of cols in the dataset from 160 to 58 (including classe). The final set of cols that will be used to prepare the model are:
+```{r,echo=TRUE,eval=TRUE}
+names(train_train_keep)
+```
+
+####Modeling:
+Now we have the training set ready. We will use random forest methodology. However to ratify the accuracy of the model, we will perform cross validation by performing a split within the training data itself. We will then compare the predicted values as per the training set with the observed values which we have access to (the test set is a part of the training set itself, so we have access to the actual values). Here we do a 5-fold cross validation. It's a small number, but it should be sufficient to indicate the accuracy of the model.
+```{r,echo=TRUE,eval=TRUE}
+set.seed(10)
+obs_val <- vector()
+pred_val <- vector()
+
+for(count in 1:5)
+{
+  sample <- sample(1:dim(train_train_keep)[1], size=dim(train_train_keep)[1]*0.8, replace=F)
+  train_crosVal <- train_train_keep[sample,]
+  test_crosVal <- train_train_keep[-sample,]
+  model_crosVal <- randomForest(classe ~ ., data=train_crosVal)
+  obs_val <- c(obs_val, test_crosVal$classe) #actual values
+  pred_val <- c(pred_val, predict(model_crosVal, test_crosVal)) #predicted values
+}
+
+confusionMatrix(pred_val, obs_val)$table
+```
+
+We observe that the model seems to be quite accurate with very few misclassification errors. Hence we proceed with this methodology and prepare the model by running random forest on the training set.
+
+```{r,echo=TRUE,eval=TRUE}
+rfmodel <- randomForest(classe~.,data=train_train_keep)
+```
+
+We then test this model on our test dataset which we had created right at the beginning.
+```{r,echo=TRUE,eval=TRUE}
+confusionMatrix(predict(rfmodel, newdata=train_test_keep[,-ncol(train_test_keep)]), train_test_keep$classe)
+```
+
+The results reflect an accuracy of ~99.9%.
